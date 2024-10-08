@@ -1,0 +1,160 @@
+To implement this project, we will follow these steps for the backend and frontend tasks:
+
+### **Backend Setup**
+
+1. **Database Design:**
+   Define an efficient schema for storing product transaction data. Let's assume we use MongoDB since it's document-based and works well with JSON responses.
+
+   Sample Schema:
+   ```js
+   {
+       productId: String,
+       title: String,
+       description: String,
+       category: String,
+       price: Number,
+       dateOfSale: Date,
+       sold: Boolean
+   }
+   ```
+
+2. **Fetching Seed Data:**
+   Create a script to fetch data from the API and store it in the database.
+   
+   - Use a library like Axios or Fetch in Node.js to make a GET request to `https://s3.amazonaws.com/roxiler.com/product_transaction.json`.
+   - Loop through the JSON data and insert it into the database.
+
+3. **API Routes:**
+   Using Node.js (Express framework), define the necessary APIs:
+
+   - **Initialize Database API**: Fetch and insert data from the external API into the database.
+     ```js
+     app.get('/initialize', async (req, res) => {
+         const response = await axios.get('https://s3.amazonaws.com/roxiler.com/product_transaction.json');
+         const transactions = response.data;
+         await Transaction.insertMany(transactions);
+         res.send("Database initialized with seed data");
+     });
+     ```
+
+   - **List Transactions API**: This will handle search, pagination, and filtering by month.
+     ```js
+     app.get('/transactions', async (req, res) => {
+         const { page = 1, perPage = 10, search = '', month } = req.query;
+         const regex = new RegExp(search, 'i');
+         const transactions = await Transaction.find({
+             $or: [{ title: regex }, { description: regex }, { price: regex }],
+             dateOfSale: { $regex: `-${month}-` }
+         })
+         .skip((page - 1) * perPage)
+         .limit(perPage);
+         
+         res.json(transactions);
+     });
+     ```
+
+   - **Statistics API**: Provide statistics for a selected month.
+     ```js
+     app.get('/statistics', async (req, res) => {
+         const { month } = req.query;
+         const totalSales = await Transaction.aggregate([
+             { $match: { dateOfSale: { $regex: `-${month}-` } } },
+             { $group: { _id: null, totalAmount: { $sum: "$price" }, soldItems: { $sum: 1 } } }
+         ]);
+         const unsoldItems = await Transaction.countDocuments({ sold: false, dateOfSale: { $regex: `-${month}-` } });
+         res.json({ totalSales, unsoldItems });
+     });
+     ```
+
+   - **Bar Chart API**: Group data by price ranges.
+     ```js
+     app.get('/bar-chart', async (req, res) => {
+         const { month } = req.query;
+         const priceRanges = [
+             { range: '0-100', min: 0, max: 100 },
+             { range: '101-200', min: 101, max: 200 },
+             //...continue for all ranges
+         ];
+         const itemsInRange = await Promise.all(priceRanges.map(async range => {
+             const count = await Transaction.countDocuments({
+                 price: { $gte: range.min, $lt: range.max },
+                 dateOfSale: { $regex: `-${month}-` }
+             });
+             return { range: range.range, count };
+         }));
+         res.json(itemsInRange);
+     });
+     ```
+
+   - **Pie Chart API**: Provide the number of items per category.
+     ```js
+     app.get('/pie-chart', async (req, res) => {
+         const { month } = req.query;
+         const categories = await Transaction.aggregate([
+             { $match: { dateOfSale: { $regex: `-${month}-` } } },
+             { $group: { _id: "$category", count: { $sum: 1 } } }
+         ]);
+         res.json(categories);
+     });
+     ```
+
+   - **Combined API**: Combine responses from all the APIs.
+     ```js
+     app.get('/combined', async (req, res) => {
+         const { month } = req.query;
+         const transactions = await axios.get(`/transactions?month=${month}`);
+         const statistics = await axios.get(`/statistics?month=${month}`);
+         const barChart = await axios.get(`/bar-chart?month=${month}`);
+         const pieChart = await axios.get(`/pie-chart?month=${month}`);
+         res.json({ transactions: transactions.data, statistics: statistics.data, barChart: barChart.data, pieChart: pieChart.data });
+     });
+     ```
+
+### **Frontend Setup**
+
+1. **User Interface Design:**
+   - Build a single page where users can select a month from the dropdown, see transaction data, and view charts (bar and pie).
+   - Default month: March.
+   - Use React for building the frontend, Axios to make API calls, and a chart library like Chart.js for visualizations.
+
+2. **Table with Pagination and Search:**
+   - Build the table component to display transactions.
+   - Include a search box and buttons for pagination (Next/Previous).
+
+   Example:
+   ```jsx
+   const TransactionsTable = ({ month }) => {
+       const [transactions, setTransactions] = useState([]);
+       const [search, setSearch] = useState('');
+       const [page, setPage] = useState(1);
+
+       useEffect(() => {
+           axios.get(`/transactions?month=${month}&search=${search}&page=${page}`)
+               .then(response => setTransactions(response.data));
+       }, [month, search, page]);
+
+       return (
+           <>
+               <input type="text" placeholder="Search..." onChange={e => setSearch(e.target.value)} />
+               <table>
+                   {/* Render transactions */}
+               </table>
+               <button onClick={() => setPage(page - 1)}>Previous</button>
+               <button onClick={() => setPage(page + 1)}>Next</button>
+           </>
+       );
+   };
+   ```
+
+3. **Statistics Box:**
+   - Fetch statistics and display the total amount, total sold items, and unsold items.
+
+4. **Bar Chart and Pie Chart:**
+   - Use Chart.js to implement the bar chart and pie chart based on the data from the APIs.
+
+### **Technologies to Use:**
+- **Backend:** Node.js, Express.js, MongoDB (Mongoose for ORM), Axios
+- **Frontend:** React.js, Axios, Chart.js
+- **API Testing:** Postman or any HTTP client.
+
+This should provide a robust solution for both backend and frontend tasks!
